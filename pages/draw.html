@@ -171,54 +171,22 @@
 
         </div>
     </header>
+    <header style="width: 100%;">
+        <div class="bar" style="display: flex;">
+            <button class="tool-select" data-tooltype="pan">Pan</button>
+            <button class="tool-select" data-tooltype="select">Select</button>
+            <button class="tool-select" data-tooltype="newTable">New Table</button>
+            <button class="tool-select" data-tooltype="newRelation">New Relation</button>
+        </div>
+    </header>
     <div class="canvas-container">
-
-    </div>
-
-    <div>
-        Selected table person:
-        <ul>
-            <li>ID</li>
-            <li>firstname</li>
-            <li>lastname</li>
-        </ul>
-    </div>
-    
-    <div id="menu" style="position: fixed; right: 4px; top: 0px; width: 190px; background-color: #fff; box-shadow: rgba(0, 0, 0, 0.16) 0px 3px 6px 0px, rgba(0, 0, 0, 0.43) 0px 3px 6px 0px;" style="overflow: hidden;">
-        <div id="toggle" class="on"></div>
-        <input type="button" id="saveload" value="Save / Load">
-
-        <hr>
-
-        <input type="button" id="addtable" value="Add table">
-        <input type="button" id="edittable" value="Edit table">
-        <input type="button" id="tablekeys" value="Keys">
-        <input type="button" id="removetable" value="Remove table">
-        <input type="button" id="aligntables" value="Align tables">
-        <input type="button" id="cleartables" value="Clear tables">
-    
-        <hr>
-    
-        <input type="button" id="addrow" value="Add field">
-        <input type="button" id="editrow" value="Edit field" disabled="">
-        <input type="button" id="uprow" class="small" value="Up" disabled=""><input type="button" id="downrow" class="small" value="Down" disabled="">
-        <input type="button" id="foreigncreate" value="Create foreign key" disabled="">
-        <input type="button" id="foreignconnect" value="Connect foreign key" disabled="">
-        <input type="button" id="foreigndisconnect" value="Remove foreign key" disabled="">
-        <input type="button" id="removerow" value="Remove field" disabled="">
-    
-        <hr>
-    
-        <input type="button" id="options" value="Options">
-        <a href="https://github.com/ondras/wwwsqldesigner/wiki" target="_blank"><input type="button" id="docs" value="Documentation"></a>
 
     </div>
 </body>
 <script type="module" >
-    import * as ModuleDraw from "../wwwroot/js-src/Draw.js";
+    import * as ModuleDrawController from "../wwwroot/js-src/DrawController.js";
     import * as ModuleSchemaTest from "../wwwroot/js-src/SchemaTest.js";
     import * as ModuleParser from "../wwwroot/js-src/Parser.js";
-    import * as ModuleDisplay from "../wwwroot/js-src/Display.js";
 
     let height = 40;
     let width = 100;
@@ -226,13 +194,20 @@
     let tables = new ModuleParser.Parser().parse(schema);
     console.log(tables);
 
-    let draw = new ModuleDraw.Draw();
+    let draw = new ModuleDrawController.DrawController();
     await draw.init(1080, 720, tables);
 
     document.querySelector('#getInfo').addEventListener('click', () => {
         console.log(draw.viewport.lastViewport.scaleX);
         draw.render(true);
     })
+
+    document.querySelectorAll('.tool-select').forEach(
+        x => x.addEventListener('click', () => {
+            let selectedTool = x.dataset.tooltype;
+            console.log(selectedTool);
+            draw.handleToolChange(selectedTool)
+    }));
 </script>
 
 
