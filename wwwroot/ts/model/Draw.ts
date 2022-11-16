@@ -1,28 +1,26 @@
 import { Rectangle } from "pixi.js";
 import { Table } from "./Table";
-import { Transaction } from "./../Transaction";
+import { History } from "../commands/History";
+import { Schema } from "./Schema";
+import { DrawChar } from "./DrawChar";
 
 export class Draw {
-    transactions = new Transaction()
-    worldDrawArea: string[] = [];
-    fontCharSizeWidth = 14;
-    fontCharSizeHeight = 14;
-    zoomOut = 3;
-    zoomIn = 2;
-    tables: Table[] = [];
-    screenContainerSize: Rectangle = new Rectangle()
+    history = new History();
+    worldDrawArea: DrawChar[] = [];
+    static fontCharSizeWidth = 7;
+    static fontCharSizeHeight = 14;
+    static zoomOut = 3;
+    static zoomIn = 2;
+    selectedTable: Table | null = null
+    schema: Schema;
     activeTool: string = "pan";
+    transferData: { viewportLeft: number, viewportTop: number, viewportScaleX: number, viewportScaleY: number } | null = null
     
-    constructor() {
-
-    }
-
-    init(tables: Table[], screenContainerSize: Rectangle) {
-        this.tables = tables;
-        this.screenContainerSize = screenContainerSize;
+    constructor(schema: Schema) {
+        this.schema = schema;
     }
 
     getVisibleTables() {
-        return this.tables.filter(x => !x.isHoverSource)
+        return this.schema.tables.filter(x => !x.isHoverSource)
     }
 }
