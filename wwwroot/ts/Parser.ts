@@ -15,8 +15,6 @@ export class Parser {
         let rows = schema.split('\n');
         let width = Math.max(...(rows.map(el => el.length)));
         let height = rows.length;
-        console.log("xMax: " + width);
-        console.log("yMax: " + height);
 
         let board: string[] = new Array(width * height);
         board.fill(" ");
@@ -26,70 +24,72 @@ export class Parser {
                 board[y * width + x] = row[x];
             }
         }
-        console.log(board);
 
-        let tables: Table[] = [];
+        let tablesRects: Rectangle[] = [];
         for (let y = 0; y < height; y++) {
             for (let x = 0; x < width; x++) {
                 let tile = board[y * width + x];
                 if (tile === "+" && 
-                    ! tables.some(
+                    ! tablesRects.some(
                         function(table) { 
-                            return table.getContainingRect().contains(x, y);
+                            return table.contains(x, y);
                         }
                     )
                 ) {
-                    // @ts-ignore
-                    let possibleTable = new Table({ rect: new Rectangle(x, y, 0, 0), head: "", tableRows: [] });
+                    let possibleTable = new Rectangle(x, y, 0, 0);
                     for (let a = 0; 
                         a < width - x
                         && ["-", "+"].includes(board[y * width + x + a]); 
                         a++) {
                         if (x + a + 1 < width && board[y * width + x + a + 1] === " ") {
-                            possibleTable.rect.width = a + 1;
+                            possibleTable.width = a + 1;
                             break;
                         }
-                    }possibleTable.rect
+                    }possibleTable
                     for (let a = 0; 
-                        possibleTable.rect.width != 0 
+                        possibleTable.width != 0 
                         && a < height - y
                         && ["|", "+"].includes(board[(y + a) * width + x]); 
                         a++) {
                         if (y + a + 1 < height && board[(y + a + 1) * width + x] === " ") {
-                            possibleTable.rect.height = a + 1;
+                            possibleTable.height = a + 1;
                             break;
                         }
                     }
-                    if (possibleTable.rect.width != 0 && possibleTable.rect.height != 0) {
-                        tables.push(possibleTable)
+                    if (possibleTable.width != 0 && possibleTable.height != 0) {
+                        tablesRects.push(possibleTable)
                     }
                 }
             }
         }
 
-        for (let table of tables) {
+        let tables = [];
+        for (let rect of tablesRects) {
             let tableSpec = board.slice(
-                (table.rect.y + 1) * width + table.rect.left + 1, 
-                (table.rect.y + 1) * width + table.rect.right - 2)
+                (rect.y + 1) * width + rect.left + 1, 
+                (rect.y + 1) * width + rect.right - 2)
                 .join("").trim();
-            table.head = tableSpec.split(":")[0];
-            for (let cy = table.rect.y + 3; cy < table.rect.bottom - 1; cy++) {
+            let head = tableSpec.split(":")[0];
+            let tableRows = []
+            for (let cy = rect.y + 3; cy < rect.bottom - 1; cy++) {
                 let row = board.slice(
-                    (cy) * width + table.rect.left + 1, 
-                    (cy) * width + table.rect.right - 2)
+                    (cy) * width + rect.left + 1, 
+                    (cy) * width + rect.right - 2)
                     .join("").trim();
                 let columns = row.split("|").map(function(item) { return item.trim(); });
                 let attributeList = columns[2].split(',').map(x => x.trim());
-                table.tableRows.push(new TableRow(columns[0], columns[1], attributeList));
+                tableRows.push(TableRow.init(columns[0], columns[1], attributeList));
             }
+            tables.push(Table.init(new Point(rect.x, rect.y), head, tableRows));
         }
 
         let relations: Relation[] = [];
         for (let table of tables) {
-            let outer = (new MyRect(table.rect.x - 1, table.rect.y - 1, table.rect.width + 2, table.rect.height + 2)).ToPoints();
-            let edgePoints = outer.filter(point => ! table.rect.contains(point.x, point.y))
+            let tableRect = table.getContainingRect();
+            let outer = (new MyRect(tableRect.x - 1, tableRect.y - 1, tableRect.width + 2, tableRect.height + 2)).ToPoints();
+            let edgePoints = outer.filter(point => ! tableRect.contains(point.x, point.y))
             for (const edgePoint of edgePoints) {
-                if (! new Rectangle(0, 0, width, height).contains(edgePoint.x, edgePoint.y)) continue
+                if (! new Rectangle(0, 0, width, height).contains(edgePoint.x, edgePoint.y)) continue;
                 let edgeChar = board[edgePoint.y * width + edgePoint.x];
                 if (! ["!", "?", "m"].includes(edgeChar)) continue;
                 if (relations.some(relation => 
@@ -112,10 +112,10 @@ export class Parser {
                     }
                 };
                 let direction = "";
-                direction += table.rect.contains(edgePoint.x - 1, edgePoint.y) ? "right" : "";
-                direction += table.rect.contains(edgePoint.x + 1, edgePoint.y) ? "left" : "";
-                direction += table.rect.contains(edgePoint.x, edgePoint.y - 1) ? "down" : "";
-                direction += table.rect.contains(edgePoint.x, edgePoint.y + 1) ? "up" : "";
+                direction += tableRect.contains(edgePoint.x - 1, edgePoint.y) ? "right" : "";
+                direction += tableRect.contains(edgePoint.x + 1, edgePoint.y) ? "left" : "";
+                direction += tableRect.contains(edgePoint.x, edgePoint.y - 1) ? "down" : "";
+                direction += tableRect.contains(edgePoint.x, edgePoint.y + 1) ? "up" : "";
                 // console.log(edgePoint, edgeChar, direction);
                 let pointToCheck = getNext(edgePoint, direction)
                 
@@ -141,12 +141,13 @@ export class Parser {
                         case "?":
                         case "m":
                             pointToCheck = getNext(pointToCheck, direction);
-                            for (const table of tables) {
-                                if (table.rect.contains(pointToCheck.x, pointToCheck.y)) {
-                                    targetTable = table;
+                            for (const table2 of tables) {
+                                let table2Rect = table2.getContainingRect();
+                                if (table2Rect.contains(pointToCheck.x, pointToCheck.y)) {
+                                    targetTable = table2;
                                 }
                             }
-                            if (targetTable === null) throw Error(`Cannot parse input! No table at: '${pointToCheck}', symbol: '${char}'`);
+                            if (targetTable === null) throw Error(`Cannot parse input! No table at: '${pointToCheck}', symbol: '${board[pointToCheck.y * width + pointToCheck.x]}'`);
                             isRelationBuildingDone = true;
                             break;
                         default:

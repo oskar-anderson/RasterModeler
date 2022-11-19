@@ -1,5 +1,5 @@
 import { Viewport } from "pixi-viewport";
-import { BitmapText, Container, Graphics, InteractionEvent, Loader, Rectangle, Sprite } from "pixi.js";
+import { BitmapText, Container, Graphics, InteractionEvent, Loader, Point, Rectangle, Sprite } from "pixi.js";
 import { IScene, Manager } from "../Manager";
 import { Minimap } from "../components/Minimap";
 import { Draw } from "../model/Draw";
@@ -13,6 +13,8 @@ import { DrawChar } from "../model/DrawChar";
 import { LoaderScene } from "./LoaderScene";
 import { TableScene } from "./TableScene";
 import { Parser } from "../Parser";
+import { TableHoverPreview } from "../model/TableHoverPreview";
+
 
 export class DrawScene extends Container implements IScene {
 
@@ -20,7 +22,6 @@ export class DrawScene extends Container implements IScene {
     minimap: Minimap;
     draw: Draw;
     bottomBar: BottomBar;
-    mousemoveListeners: ((x: number, y: number) => void)[] = [];
     
     constructor(draw: Draw) {
         super();
@@ -33,11 +34,15 @@ export class DrawScene extends Container implements IScene {
             worldHeight:  Manager.height * Draw.zoomOut,
             worldWidth:   Manager.width * Draw.zoomOut,
         });
+        
+        // either of these is supposed to prevent event occuring outside canvas element, but they do not seem to work
+        // this.viewport.options.divWheel = document.querySelector("canvas")!; 
+        // this.viewport.options.interaction = Manager.getRenderer().plugins.interaction
         this.viewport.setZoom(this.draw.transferData?.viewportScaleX ?? 1)
         this.viewport.left = this.draw.transferData?.viewportLeft ?? 0
         this.viewport.top = this.draw.transferData?.viewportTop ?? 0
+        this.initViewport();
         this.addChild(this.viewport);
-        this.initViewport(this.draw.activeTool === "pan");
 
         this.minimap = new Minimap()
         this.minimap.init(
@@ -60,23 +65,27 @@ export class DrawScene extends Container implements IScene {
         this.addChild(this.minimap.container);
 
         this.interactive = true;
-        this.on('mousemove', (e: InteractionEvent) => { 
-            if (! new Rectangle(0, 0, Manager.width, Manager.height).contains(e.data.global.x, e.data.global.y)) return;  // remove outside events. PIXI is stupid.
-            for (const listener of this.mousemoveListeners) {
-                listener(Math.floor(e.data.global.x), Math.floor(e.data.global.y))  // no idea why y is someinteger.1999969482422 decimal number 
-            }
+        this.viewport.on('mousemove', (e: InteractionEvent) => { 
+            // this is neccessary when using InteractionManager 
+            // if (! new Rectangle(0, 0, Manager.width, Manager.height).contains(e.data.global.x, e.data.global.y)) return;  // remove outside events. PIXI is stupid.
+            // no idea why y is someinteger.1999969482422 decimal number 
+            this.draw.mouseScreenPosition = new Point(Math.floor(e.data.global.x), Math.floor(e.data.global.y))
+        });
+        this.on('mousedown', (e: InteractionEvent) => { 
+            this.draw.isMouseLeftDown = true;
+        });
+        this.on('mouseup', (e: InteractionEvent) => { 
+            this.draw.isMouseLeftDown = false;
         });
 
-        this.bottomBar = new BottomBar(this.getScreen());
-        this.mousemoveListeners.push((x, y) => {
-            this.bottomBar.pointermove(x, y, this.getScreen());
-        });
+        this.bottomBar = new BottomBar();
         this.addChild(this.bottomBar.getContainer());
         this.toolActivate(this.draw.activeTool);
         this.renderScreen(true);
+        console.log(this.draw.activeTool)
     }
 
-    initHtmlUi(): void {
+    init(): void {
         let header = `
         <header style="display: flex; align-items:center; padding: 2px 0">
             <span style="display: flex; justify-content: center; width: 4em">Tools</span>
@@ -240,10 +249,10 @@ export class DrawScene extends Container implements IScene {
     }
 
     
-    initViewport(enableDrag: boolean) {
+    initViewport() {
         // activate plugins
         this.viewport
-            .drag({ pressDrag: enableDrag }).clamp({ 
+            .drag().clamp({ 
                 left:   0,
                 top:    0,
                 right:  Manager.width * Draw.zoomOut,
@@ -254,7 +263,12 @@ export class DrawScene extends Container implements IScene {
                 minScale: 1/Draw.zoomOut
             });
 
-        // make panning update minimap camera indicator location
+
+        this.viewport.on('wheel', (e) => {
+            console.log("wheel")
+            console.log(e.target ? "Federated" : "viewport")
+            console.log(e)
+        })
         this.viewport.on('moved', () => {
             console.log("moved")
             this.cullViewport();
@@ -310,8 +324,13 @@ export class DrawScene extends Container implements IScene {
             screen.height + Draw.fontCharSizeHeight
             );
         for (const bitmapText of this.viewport.children) {
-            bitmapText.visible = extraScreen.contains(bitmapText.x, bitmapText.y);
+            if (! extraScreen.contains(bitmapText.x, bitmapText.y)) {
+                bitmapText.visible = false;
+            } else {
+                bitmapText.visible = (bitmapText as PIXI.BitmapText).text !== " "; 
             bitmapText.visible = (bitmapText as PIXI.BitmapText).text !== " "; 
+                bitmapText.visible = (bitmapText as PIXI.BitmapText).text !== " "; 
+            }
         }
     }
 
@@ -371,20 +390,26 @@ export class DrawScene extends Container implements IScene {
     }
 
     setWorldTable(table: Table) {
-        for (let x = table.rect.x; x < table.rect.right; x++) {
-            for (let y = table.rect.y; y < table.rect.bottom; y++) {
+        let tableRect = table.getContainingRect();
+        for (let x = tableRect.x; x < tableRect.right; x++) {
+            for (let y = tableRect.y; y < tableRect.bottom; y++) {
                 this.draw.worldDrawArea[this.getWorldPointCanvasIndex(x, y)].char = ' ';
                 this.draw.worldDrawArea[this.getWorldPointCanvasIndex(x, y)].color = this.draw.selectedTable?.id === table.id ? 0x800080 : 0x008000;
             }
         }
-        let worldCharGridRect = table.getCornerRect();
+        let worldCharGridRect = table.getContainingRect();
         let firstColumnWidth = table.getColumnWidths()[0];
         let secondColumnWidth = table.getColumnWidths()[1];
         let thirdColumnWidth = table.getColumnWidths()[2];
-        let rectHead = new Rectangle(worldCharGridRect.x, worldCharGridRect.y, worldCharGridRect.width, 2);
-        let rectNameRow = new Rectangle(worldCharGridRect.x, worldCharGridRect.y + 2, firstColumnWidth, worldCharGridRect.height - 2);
-        let rectTypeRow = new Rectangle(worldCharGridRect.x + firstColumnWidth, worldCharGridRect.y + 2, secondColumnWidth, worldCharGridRect.height - 2);
-        let rectAttributeRow = new Rectangle(worldCharGridRect.x + firstColumnWidth + secondColumnWidth, worldCharGridRect.y + 2, thirdColumnWidth, worldCharGridRect.height - 2);
+        let rectHead = new Rectangle(worldCharGridRect.x, worldCharGridRect.y, worldCharGridRect.width - 1, 2);
+        let rectNameRow = new Rectangle(worldCharGridRect.x, worldCharGridRect.y + 2, firstColumnWidth, worldCharGridRect.height - 1 - 2);
+        let rectTypeRow = new Rectangle(worldCharGridRect.x + firstColumnWidth, worldCharGridRect.y + 2, secondColumnWidth, worldCharGridRect.height - 1 - 2);
+        let rectAttributeRow = new Rectangle(worldCharGridRect.x + firstColumnWidth + secondColumnWidth, worldCharGridRect.y + 2, thirdColumnWidth, worldCharGridRect.height - 1 - 2);
+        // console.log(table.head)
+        // console.log(rectHead)
+        // console.log(rectNameRow)
+        // console.log(rectTypeRow)
+        // console.log(rectAttributeRow)
         let parts = ['+', '-', '+', '|', 'X', '|', '+', '-', '+'];
         this.paintWorld9PatchSafe(rectHead, parts);
         this.paintWorld9PatchSafe(rectNameRow, parts);
@@ -451,6 +476,8 @@ export class DrawScene extends Container implements IScene {
     handleToolChange(toolname: string) {
         let previousTool = this.draw.activeTool;
         this.draw.activeTool = toolname;
+        console.log(previousTool);
+        console.log(toolname);
         this.toolDisable(previousTool);
         this.toolActivate(this.draw.activeTool);
     }
@@ -458,121 +485,145 @@ export class DrawScene extends Container implements IScene {
     toolDisable(previousTool: string) {
         this.draw.selectedTable = null;
         this.renderScreen(false)
+        // disable Panning 
+        // @ts-ignore
+        this.viewport.plugins.get("drag")!.options.pressDrag = false;
         switch(previousTool) {
             case "pan":
-                // pausePanning
-                this.initViewport(false); // viewport is still needed for minimap updating
                 break;
             case "select":
                 // pauseSelect
-                this.viewport.removeAllListeners('mousedown');
-                this.viewport.removeAllListeners('mouseup');
-                this.viewport.removeAllListeners('mousemove');
-                this.viewport.removeAllListeners('mouseout');
+                this.viewport.removeListener('mousedown', this.mouseDown);
+                this.viewport.removeListener('mouseup', this.selectToolMouseUp);
+                this.viewport.removeListener('mousemove', this.selectToolMouseMove);
+                this.viewport.removeListener('mouseout', this.selectToolMouseOut);
                 break;
             case "editTable":
-                this.viewport.removeAllListeners('mousedown');
                 break;
         }
     }
 
-    
-    toolActivate(tool: string) {
-        let resumeSelect = () => {
-            let mouseMoveFunc = (e: PIXI.InteractionEvent, table: Table, tablePivotX: number, tablePivotY: number) => {
-                console.log(`mousemove`);
-                let x = this.getScreen().x + e.data.global.x / this.viewport.scale.x;
-                let y = this.getScreen().y + e.data.global.y / this.viewport.scale.y;
-                let charGridX = Math.floor(x / Draw.fontCharSizeWidth);
-                let charGridY = Math.floor(y / Draw.fontCharSizeHeight);
-                let newX = charGridX + tablePivotX
-                let newY = charGridY + tablePivotY
-                if (table.rect.x === newX && table.rect.y === newY) return;
-                table.rect.x = newX;
-                table.rect.y = newY;
-                this.renderScreen(false)
-            };
-    
-            // pointerdown unlike mousedown captures right click as well
-            this.viewport.on('mousedown', (e: PIXI.InteractionEvent) => {  // same as addEventListener except type can be specified inside parameter
-                console.log("mousedown");
-                let x = this.getScreen().x + e.data.global.x / this.viewport.scale.x;
-                let y = this.getScreen().y + e.data.global.y / this.viewport.scale.y;
-                let charGridX = Math.floor(x / Draw.fontCharSizeWidth);
-                let charGridY = Math.floor(y / Draw.fontCharSizeHeight);
-                let hover: Table | null = null;
-                for (let table of this.draw.schema.tables) {
-                    if (table.getContainingRect().contains(charGridX, charGridY)) {
-                        let tablePivotX = table.rect.x - charGridX;
-                        let tablePivotY = table.rect.y - charGridY;
-                        hover = table.copy();
-                        this.draw.selectedTable = hover;
-                        hover.isHoverTarget = true;
-                        table.isHoverSource = true;
-                        this.viewport.on('mousemove', (e) => mouseMoveFunc(e, hover!, tablePivotX, tablePivotY));
-                        this.viewport.on('mouseout', () => {
-                            console.log("mouseout");
-                            this.viewport.removeAllListeners('mousemove');
-                            this.viewport.removeAllListeners('mouseout');  
-                        });
-                    }
-                }
-                if (hover !== null) {
-                    this.draw.schema.tables.push(hover);
-                    this.renderScreen(false);
-                }
-            })
-    
-            this.viewport.on('mouseup', (e: PIXI.InteractionEvent) => {  // same as addEventListener except type can be specified inside parameter
-                console.log("mouseup");
-                let isGoodPlaceForTableFunc = (hover: Table | null) => {
-                    if (hover != null) {
-                        let isGoodPlacement = true;
-                        for (let table of this.draw.schema.tables.filter(x => !x.isHoverSource && !x.isHoverTarget)) {
-                            if (table.rect.intersects(hover.rect)) {
-                                isGoodPlacement = false;
-                            }
-                        }
-                        return isGoodPlacement;
-    
-                    }
-                    return false;
-                }
-                let hover = this.draw.schema.tables.find(x => x.isHoverTarget) ?? null;
-                this.draw.schema.tables = this.draw.schema.tables.filter(x => !x.isHoverTarget);
-                let isGoodPlaceForTable = isGoodPlaceForTableFunc(hover)
-                console.log(`isGoodPlaceForTable: ${isGoodPlaceForTable}`);
-                if (isGoodPlaceForTable) {
-                    let invisible = this.draw.schema.tables.find(x => x.isHoverSource)!;
-                    let xDiff = hover!.rect.x - invisible.rect.x;
-                    let yDiff = hover!.rect.y - invisible.rect.y;
-                    
-                    this.draw.history.execute(new CommandMoveTableRelative(
-                        this.draw, {
-                            id: invisible.id,
-                            x: xDiff, 
-                            y: yDiff
-                        })
-                    );
-                    invisible.isHoverSource = false;
-                    this.draw.selectedTable = invisible;
-                } else {
-                    this.draw.schema.tables.forEach(x => x.isHoverSource = false);
-                }
-    
-                this.renderScreen(false);
-                this.viewport.removeAllListeners('mousemove');
-                this.viewport.removeAllListeners('mouseout');  
-            })
-        }
 
-        let resumeEditTable = () => {
-            this.viewport.on('mousedown', (e: PIXI.InteractionEvent) => {  // same as addEventListener except type can be specified inside parameter
-                console.log("mousedown");
-                let x = this.getScreen().x + e.data.global.x / this.viewport.scale.x;
-                let y = this.getScreen().y + e.data.global.y / this.viewport.scale.y;
+    selectToolMouseMove = (e: PIXI.InteractionEvent) => {
+        console.log(`mousemove`);
+        console.log(JSON.parse(JSON.stringify(e.data.global)));
+        if (! this.draw.hover) return;
+        let x = this.getScreen().x + e.data.global.x / this.viewport.scale.x;
+        let y = this.getScreen().y + e.data.global.y / this.viewport.scale.y;
+        let charGridX = Math.floor(x / Draw.fontCharSizeWidth);
+        let charGridY = Math.floor(y / Draw.fontCharSizeHeight);
+        let newX = charGridX + this.draw.hover.hoverTablePivotX;
+        let newY = charGridY + this.draw.hover.hoverTablePivotY;
+        if (this.draw.hover.hoverTable!.position.x === newX && this.draw.hover.hoverTable!.position.y === newY) return;
+        this.draw.hover.hoverTable!.position.x = newX;
+        this.draw.hover.hoverTable!.position.y = newY;
+        this.renderScreen(false)
+    };
+
+    selectToolMouseOut = () => {
+        console.log("mouseout");
+        this.viewport.removeListener('mousemove', this.selectToolMouseMove);
+        this.viewport.removeListener('mouseout', this.selectToolMouseOut);  
+    }
+
+    mouseDown = (e: PIXI.InteractionEvent) => {  // same as addEventListener except type can be specified inside parameter
+        console.log("mousedown");
+        console.log(JSON.parse(JSON.stringify(e.data.global)));
+        let x = this.getScreen().x + e.data.global.x / this.viewport.scale.x;
+        let y = this.getScreen().y + e.data.global.y / this.viewport.scale.y;
+        let charGridX = Math.floor(x / Draw.fontCharSizeWidth);
+        let charGridY = Math.floor(y / Draw.fontCharSizeHeight);
+        for (let table of this.draw.schema.tables) {
+            if (table.getContainingRect().contains(charGridX, charGridY)) {
+                let hover = Table.initClone(table);
+                hover.initNewId();
+                this.draw.selectedTable = hover;
+                this.draw.hover = new TableHoverPreview(hover, table, table.position.x - charGridX, table.position.y - charGridY);
+                this.viewport.on('mousemove', this.selectToolMouseMove);
+                this.viewport.on('mouseout', this.selectToolMouseOut);
+            }
+        }
+        if (this.draw.hover !== null) {
+            this.draw.schema.tables.push(this.draw.hover.hoverTable);
+            this.renderScreen(false);
+        }
+    }
+
+    selectToolMouseUp = (e: PIXI.InteractionEvent) => {  // same as addEventListener except type can be specified inside parameter
+        console.log("mouseup");
+        let isGoodPlaceForTableFunc = () => {
+            if (this.draw.hover !== null) {
+                let hoverRect = this.draw.hover.hoverTable.getContainingRect();
+                return this.draw.schema.tables
+                    .filter(x => x.id !== this.draw.hover!.hoverTable?.id && x.id !== this.draw.hover!.hoverTableSource?.id)
+                    .every(x => !x.getContainingRect().intersects(hoverRect))
+            }
+            return false
+        }
+        this.draw.schema.tables = this.draw.schema.tables.filter(x => x.id !== this.draw.hover?.hoverTable?.id);
+        let isGoodPlaceForTable = isGoodPlaceForTableFunc();
+        console.log(`isGoodPlaceForTable: ${isGoodPlaceForTable}`);
+        if (isGoodPlaceForTable) {
+            let hoverSource = this.draw.hover!.hoverTableSource;
+            let xDiff = this.draw.hover!.hoverTable.position.x - hoverSource.position.x;
+            let yDiff = this.draw.hover!.hoverTable.position.y - hoverSource.position.y;
+            
+            this.draw.history.execute(new CommandMoveTableRelative(
+                this.draw, {
+                    id: hoverSource.id,
+                    x: xDiff, 
+                    y: yDiff
+                })
+            );
+        }
+        this.draw.hover = null;
+        this.draw.selectedTable = null;
+
+        this.renderScreen(false);
+        this.viewport.removeListener('mousemove', this.selectToolMouseMove);
+        this.viewport.removeListener('mouseout', this.selectToolMouseOut);  
+    }
+    
+
+    toolActivate(tool: string) {
+        switch(tool) {
+            case "pan":
+                // enable Panning 
+                // @ts-ignore
+                this.viewport.plugins.get("drag")!.options.pressDrag = true;
+                break;
+            case "select":
+                // pointerdown unlike mousedown captures right click as well
+                this.viewport.on('mousedown', this.mouseDown)
+                this.viewport.on('mouseup', this.selectToolMouseUp)
+                break;
+            case "editTable":
+                break;
+        }
+    }
+
+    public update(deltaMS: number): void {
+        this.minimap.update(this.draw.getVisibleTables(), this.getScreen());
+        this.bottomBar.pointermove(
+            this.draw.mouseScreenPosition.x, 
+            this.draw.mouseScreenPosition.y, 
+            Math.floor((this.getScreen().x + this.draw.mouseScreenPosition.x) * this.viewport.scale.x),
+            Math.floor((this.getScreen().y + this.draw.mouseScreenPosition.y) * this.viewport.scale.y),
+            Math.floor((this.getScreen().x + this.draw.mouseScreenPosition.x) * this.viewport.scale.x / Draw.fontCharSizeWidth),
+            Math.floor((this.getScreen().y + this.draw.mouseScreenPosition.y) * this.viewport.scale.y / Draw.fontCharSizeHeight),
+            Number((this.viewport.scale.y).toFixed(2))  // x and y is the same
+        );
+        switch (this.draw.activeTool) {
+            case "editTable":
+                if (! this.draw.isMouseLeftDown) break;
+                console.log("update editTable")
+                this.draw.isMouseLeftDown = false;
+                let x = this.getScreen().x + this.draw.mouseScreenPosition.x / this.viewport.scale.x;
+                let y = this.getScreen().y + this.draw.mouseScreenPosition.y / this.viewport.scale.y;
                 let charGridX = Math.floor(x / Draw.fontCharSizeWidth);
                 let charGridY = Math.floor(y / Draw.fontCharSizeHeight);
+                console.log("this.draw.mouseWorldPosition.x: ", this.draw.mouseScreenPosition.x, ", this.draw.mouseWorldPosition.y: ", this.draw.mouseScreenPosition.y)
+                console.log("charGridX: ", charGridX, ", charGridY: ", charGridY)
                 for (let table of this.draw.schema.tables) {
                     if (table.getContainingRect().contains(charGridX, charGridY)) {
                         this.draw.selectedTable = table;
@@ -585,23 +636,9 @@ export class DrawScene extends Container implements IScene {
                         Manager.changeScene(new TableScene(this.draw))
                     }
                 }
-            })
-        }
-        switch(tool) {
-            case "pan":
-                // resumePanning
-                this.initViewport(true)
                 break;
-            case "select":
-                resumeSelect()
-                break;
-            case "editTable":
-                resumeEditTable();
+            default:
                 break;
         }
-    }
-
-    public update(deltaMS: number): void {
-        this.minimap.update(this.draw.getVisibleTables(), this.getScreen());
     }
 }
