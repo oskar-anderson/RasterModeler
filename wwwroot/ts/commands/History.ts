@@ -1,4 +1,6 @@
 import { Draw } from "../model/Draw";
+import { CommandCreateTable } from "./appCommands/CommandCreateTable";
+import { CommandDeleteTable } from "./appCommands/CommandDeleteTable";
 import { CommandModifyTable } from "./appCommands/CommandModifyTable";
 import { CommandMoveTableRelative } from "./appCommands/CommandMoveTableRelative";
 import { ICommand } from "./ICommand";
@@ -8,6 +10,8 @@ export class History {
     static implementations = [ 
         { name: CommandMoveTableRelative.name, constructor: CommandMoveTableRelative },
         { name: CommandModifyTable.name, constructor: CommandModifyTable },
+        { name: CommandCreateTable.name, constructor: CommandCreateTable },
+        { name: CommandDeleteTable.name, constructor: CommandDeleteTable },
     ];
     undoHistory: string[] = [];
     redoHistory: string[] = [];
