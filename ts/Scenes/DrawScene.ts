@@ -14,6 +14,8 @@ import { EditTableTool } from "../tools/EditTableTool";
 import { SelectTool } from "../tools/SelectTool";
 import { CreateTableTool } from "../tools/CreateTableTool";
 import { RelationEditTool } from "../tools/RelationEditTool";
+import { ScriptingScene } from "./ScriptingScene";
+import { IToolManager, IToolNames } from "../tools/ITool";
 
 
 export class DrawScene extends Container implements IScene {
@@ -30,10 +32,7 @@ export class DrawScene extends Container implements IScene {
 
         this.viewport = this.initViewport();
         this.addChild(this.viewport);
-        if (this.draw.activeTool === null) {
-            this.draw.activeTool = new PanTool(this.viewport);
-            this.draw.activeTool.init();
-        }
+        IToolManager.toolActivate(this.draw, this.draw.activeTool?.getName() ?? IToolNames.pan, { viewport: this.viewport });
         
 
         this.minimap = new Minimap()
@@ -63,6 +62,7 @@ export class DrawScene extends Container implements IScene {
             // this is neccessary when using InteractionManager 
             // if (! new Rectangle(0, 0, Manager.width, Manager.height).contains(e.data.global.x, e.data.global.y)) return;  // remove outside events. PIXI is stupid.
             // no idea why y is someinteger.1999969482422 decimal number 
+            this.draw.mouseScreenPosition = new Point(this.draw.mouseScreenPositionNext.x, this.draw.mouseScreenPositionNext.y);
             this.draw.mouseScreenPositionNext = new Point(Math.floor(e.data.global.x), Math.floor(e.data.global.y))
         });
         this.on('mousedown', (e: InteractionEvent) => { 
@@ -78,29 +78,19 @@ export class DrawScene extends Container implements IScene {
     }
 
     init(): void {
+        (document.querySelector(".canvas-container")! as HTMLElement).style.display = "block";
         let header = `
         <header style="display: flex; align-items:center; padding: 2px 0">
             <span style="display: flex; justify-content: center; width: 4em">Tools</span>
             <div class="bar btn-group btn-group-toggle">
-                <button class="tool-select btn btn-light ${this.draw.activeTool instanceof PanTool ? "active" : ""}" data-tooltype="pan">Pan</button>
-                <button class="tool-select btn btn-light ${this.draw.activeTool instanceof SelectTool ? "active" : ""}" data-tooltype="select">Move table</button>
-                <button class="tool-select btn btn-light ${this.draw.activeTool instanceof EditTableTool ? "active" : ""}" data-tooltype="editTable">Edit table</button>
-                <button class="tool-select btn btn-light ${this.draw.activeTool instanceof CreateTableTool ? "active" : ""}" data-tooltype="newTable">New table</button>
-                <button class="tool-select btn btn-light ${this.draw.activeTool instanceof RelationEditTool ? "active" : ""}" data-tooltype="editRelation">Edit relation</button>
+                <button class="tool-select btn btn-light ${this.draw.activeTool instanceof PanTool ? "active" : ""}" data-tooltype="${IToolNames.pan}">Pan</button>
+                <button class="tool-select btn btn-light ${this.draw.activeTool instanceof SelectTool ? "active" : ""}" data-tooltype="${IToolNames.select}">Move table</button>
+                <button class="tool-select btn btn-light ${this.draw.activeTool instanceof EditTableTool ? "active" : ""}" data-tooltype="${IToolNames.editTable}">Edit table</button>
+                <button class="tool-select btn btn-light ${this.draw.activeTool instanceof CreateTableTool ? "active" : ""}" data-tooltype="${IToolNames.newTable}">New table</button>
+                <button class="tool-select btn btn-light ${this.draw.activeTool instanceof RelationEditTool ? "active" : ""}" data-tooltype="${IToolNames.editRelation}">Edit relation</button>
             </div>
         </header>
-        `;
-        document.querySelector(".tool-select-container")!.innerHTML = header;
-        let toolElements = document.querySelectorAll('.tool-select')
-        for (const toolEl of toolElements) {
-            toolEl.addEventListener('click', () => {
-                let selectedTool = (toolEl as HTMLElement).dataset.tooltype!;
-                document.querySelectorAll(".tool-select").forEach(x => x.classList.remove("active"));
-                toolEl.classList.toggle("active");
-                this.toolActivate(selectedTool);
-            });
-        }
-            
+        `;   
         let topMenuActions = `
         <div>
 
@@ -150,7 +140,25 @@ export class DrawScene extends Container implements IScene {
             </header>
         </div>
         `;
-        document.querySelector(".top-menu-action-container")!.innerHTML = topMenuActions;
+        let actions = `
+            <header style="display: flex; align-items:center; padding: 2px 0">
+                <span style="display: flex; justify-content: center; width: 4em">Actions</span>
+                <div class="bar btn-group btn-group-toggle">
+                    <button type="button" class="scripting btn btn-light">Go Scripting</button>
+                </div>
+            </header>
+        `;
+        document.querySelector(".top-menu-action-container")!.innerHTML =  topMenuActions + header + actions;
+        let toolElements = document.querySelectorAll('.tool-select')
+        for (const toolEl of toolElements) {
+            toolEl.addEventListener('click', () => {
+                let selectedTool = (toolEl as HTMLElement).dataset.tooltype! as IToolNames;
+                document.querySelectorAll(".tool-select").forEach(x => x.classList.remove("active"));
+                toolEl.classList.toggle("active");
+                IToolManager.toolActivate(this.draw, selectedTool, { viewport: this.viewport });
+                this.renderScreen(false);
+            });
+        }
         document.querySelector('#undo')!.addEventListener('click', () => {
             console.log("undo event");
             this.draw.history.undo(this.draw);
@@ -177,10 +185,18 @@ export class DrawScene extends Container implements IScene {
             console.log("import event");
             this.import();
         });
+        document.querySelector('.scripting')?.addEventListener('click', () => {
+            this.draw.viewportDTO = { 
+                viewportLeft: this.draw.getScreen().x, 
+                viewportTop: this.draw.getScreen().y, 
+                viewportScale: this.draw.getScale(), 
+            }
+            Manager.changeScene(new ScriptingScene(this.draw));
+        })
     }
     destroyHtmlUi(): void {
-        document.querySelector(".tool-select-container")!.innerHTML = "";
         document.querySelector(".top-menu-action-container")!.innerHTML = "";
+        (document.querySelector(".canvas-container")! as HTMLElement).style.display = "none";
     }
 
     saveToClipboard() {
@@ -310,8 +326,6 @@ export class DrawScene extends Container implements IScene {
             if (! extraScreen.contains(bitmapText.x, bitmapText.y)) {
                 bitmapText.visible = false;
             } else {
-                bitmapText.visible = (bitmapText as PIXI.BitmapText).text !== " "; 
-            bitmapText.visible = (bitmapText as PIXI.BitmapText).text !== " "; 
                 bitmapText.visible = (bitmapText as PIXI.BitmapText).text !== " "; 
             }
         }
@@ -452,35 +466,6 @@ export class DrawScene extends Container implements IScene {
         paintWorldRectToScreenSafe(new Rectangle(rect.left, rect.bottom, 1, 1), bl);
         paintWorldRectToScreenSafe(new Rectangle(rect.x + 1, rect.bottom, rect.width - 1, 1), b);
         paintWorldRectToScreenSafe(new Rectangle(rect.right, rect.bottom, 1, 1), br);
-    }
-
-    toolActivate(tool: string) {
-        if (this.draw.activeTool) {
-            this.draw.activeTool.exit();
-        }
-        console.log(this.draw.activeTool);
-        console.log(tool);
-        switch(tool) {
-            case "pan":
-                this.draw.activeTool = new PanTool(this.viewport);
-                break;
-            case "select":
-                this.draw.activeTool = new SelectTool(this.draw);
-                break;
-            case "editTable":
-                this.draw.activeTool = new EditTableTool(this.draw);
-                break;
-            case "newTable":
-                this.draw.activeTool = new CreateTableTool(this.draw);
-                break;
-            case "editRelation":
-                this.draw.activeTool = new RelationEditTool();
-                break;
-            default:
-                throw Error(`toolActivate. Tool: '${tool}' does not exist!`);
-        }
-        this.draw.activeTool?.init();
-        this.renderScreen(false);
     }
 
     public update(deltaMS: number): void {
